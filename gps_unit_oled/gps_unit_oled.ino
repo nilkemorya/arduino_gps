@@ -10,10 +10,8 @@
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include "Adafruit_GFX.h"
-#include <TimeLib.h>        //http://www.arduino.cc/playground/Code/Time
 #include <Timezone.h>    //https://github.com/JChristensen/Timezone
 #include <avr/wdt.h>
-#include <Wire.h>
 #include <Adafruit_SSD1306.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
@@ -409,7 +407,7 @@ void loop()
           display.println(time_average_distance_waypoint);
           display.print("Bearing: ");
           display.println(lat_long_angle - bearing);
-          drawCompass(50, 50, 10, lat_long_angle - bearing);
+          drawCompass(50, 50, 10, -(lat_long_angle - bearing));
           display.display();
           delay(1);
           display.setCursor(0,0);
@@ -432,7 +430,7 @@ void loop()
           display.println(time_average_distance_waypoint);
           display.print("Bearing: ");
           display.println(lat_long_angle - bearing);
-          drawCompass(50, 50, 10, lat_long_angle - bearing);
+          drawCompass(50, 50, 10, -(lat_long_angle - bearing));
           display.display();
           delay(1);
           display.setCursor(0,0);
