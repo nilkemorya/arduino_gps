@@ -16,6 +16,7 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_LSM303_U.h>
+#include <math.h>
 
 #define OLED_RESET 4 // Specify reset pin for the OLED display.
 Adafruit_SSD1306 display(OLED_RESET);
@@ -41,10 +42,12 @@ float storedLat;
 float storedLong;
 float tripLat;
 float tripLong;
-float time_average_distance = 0;
+float travelled_distance = 0;
 int prev_dist_time = 0;
-float time_average_distance_waypoint = 0;
+float travelled_distance_waypoint = 0;
 Adafruit_LSM303_Mag_Unified mag = Adafruit_LSM303_Mag_Unified(12345);
+float odometer_lat;
+float odometer_long;
 
 
 void softwareReset( uint8_t prescaller) {
@@ -160,9 +163,15 @@ void drawCompass(int startX, int startY, int total_length, float theta_deg)
    *    total_length -> Approximate length of line in pixels(may be slightly off due to rounding error)
    *    Theta -> Angle in Radians from 0
    */
-    float theta = radians(theta_deg);
+    float theta = radians(fmod(theta_deg, 360.0)); // fmod normalizes angle for better pointing.
     int x_dist = sin(theta) * total_length;
     int y_dist = -cos(theta) * total_length;
+    // Draw a simple box before the line to indicate base more clearly.
+    for (int i=-2; i <= 2; i++){
+      for (int k=-2; k <= 2; k++){
+      display.drawPixel(startX+i, startY+k, WHITE);
+      }
+    }
     display.drawLine(startX,startY, startX + x_dist, startY + y_dist, WHITE);
 }
 
@@ -186,8 +195,8 @@ HardwareSerial mySerial = Serial3;
 
 void setup()
 {
-  pinMode(buttonPin, INPUT);
-  pinMode(button2Pin, INPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(button2Pin, INPUT_PULLUP);
   // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
   //Serial.begin(115200);
   // Serial debugging if needed uncomment.
@@ -240,14 +249,14 @@ void loop()
   time_t utc, local;
 
   buttonState = digitalRead(buttonPin);
-  if (buttonState == HIGH && display_switch== false){
+  if (buttonState == LOW && display_switch== false){
     display_selector += 1;
     display_switch = true;  //should prevent freewheeling display selection.
   }
   if (display_selector >=5){
     display_selector = 0;
   }
-  if (buttonState == LOW){
+  if (buttonState == HIGH){
     display_switch = false;
   }
   
@@ -272,16 +281,25 @@ void loop()
         gps_hour = GPS.hour;
         tripLat = GPS.latitudeDegrees;
         tripLong = GPS.longitudeDegrees;
+        odometer_lat = tripLat;
+        odometer_long = tripLong;
         firstrun = false;
       }
-      time_average_distance += ((millis() - prev_dist_time) * knotsToMph(GPS.speed)) /3600000.0;
-      time_average_distance_waypoint += ((millis() - prev_dist_time) * knotsToMph(GPS.speed)) /3600000.0;
+      float trip_distance = calc_dist(odometer_lat, odometer_long, GPS.latitudeDegrees, GPS.longitudeDegrees);
+      if(trip_distance >= 0.01){
+      travelled_distance += trip_distance;
+      travelled_distance_waypoint += trip_distance;
+      }
       prev_dist_time = millis();
       button2State = digitalRead(button2Pin);
-      if(button2State == HIGH){
+      if(button2State == LOW & buttonState == LOW){
+        tripLat = GPS.latitudeDegrees;
+        tripLong = GPS.longitudeDegrees;
+      }
+      if(button2State == LOW){
         storedLat = GPS.latitudeDegrees;
         storedLong = GPS.longitudeDegrees;
-        time_average_distance_waypoint = 0;
+        travelled_distance_waypoint = 0;
       }
       //This bit of magic just prevents setting our time based on bad GPS data. Stops the clock from jumping about.
       if(GPS.year<= gps_year + 1 && GPS.year>=gps_year && ((GPS.hour <= gps_hour +1 && GPS.hour >= gps_hour) || (GPS.hour == 0 && gps_hour == 23)))
@@ -347,7 +365,7 @@ void loop()
           display.println(GPS.longitudeDegrees);
   
           display.print("Speed (Mph): "); display.println(knotsToMph(GPS.speed));
-          if(GPS.speed >= 0.1){
+          if(GPS.speed >= 1.0){
           display.print("Angle: "); display.println(GPS.angle);
           }
           else{
@@ -366,7 +384,7 @@ void loop()
           display.setTextSize(3);
           display.println(knotsToMph(GPS.speed));
           display.setTextSize(1);
-          if(GPS.speed >= 0.1){
+          if(GPS.speed >= 1.0){
           bearing = GPS.angle;
           }
           else{
@@ -393,7 +411,7 @@ void loop()
 
           /* This will point back to your waypoint set by button 2, as well as giving bearing, linear distance, and approximate travel distance.*/
           float lat_long_angle = latLongPoint(GPS.latitudeDegrees, GPS.longitudeDegrees, storedLat, storedLong);
-          if(GPS.speed >= 0.1){
+          if(GPS.speed >= 1.0){
             bearing = GPS.angle;
             }
             else{
@@ -404,10 +422,10 @@ void loop()
           display.println("Distance: ");
           display.println(calc_dist(GPS.latitudeDegrees, GPS.longitudeDegrees, storedLat, storedLong));
           display.print("TD: ");
-          display.println(time_average_distance_waypoint);
+          display.println(travelled_distance_waypoint);
           display.print("Bearing: ");
           display.println(lat_long_angle - bearing);
-          drawCompass(50, 50, 10, -(lat_long_angle - bearing));
+          drawCompass(50, 50, 10, (lat_long_angle - bearing));
           display.display();
           delay(1);
           display.setCursor(0,0);
@@ -416,7 +434,7 @@ void loop()
      else if (display_selector == 4){
           /* This will point back to your origin point, as well as giving bearing, linear distance, and approximate travel distance.*/
           float lat_long_angle = latLongPoint(GPS.latitudeDegrees, GPS.longitudeDegrees, tripLat, tripLong);
-          if(GPS.speed >= 0.1){
+          if(GPS.speed >= 1.0){
             bearing = GPS.angle;
             }
             else{
@@ -427,10 +445,10 @@ void loop()
           display.print("Distance: ");
           display.println(calc_dist(GPS.latitudeDegrees, GPS.longitudeDegrees, tripLat, tripLong));
           display.print("TD: ");
-          display.println(time_average_distance_waypoint);
+          display.println(travelled_distance_waypoint);
           display.print("Bearing: ");
           display.println(lat_long_angle - bearing);
-          drawCompass(50, 50, 10, -(lat_long_angle - bearing));
+          drawCompass(50, 50, 10, (lat_long_angle - bearing));
           display.display();
           delay(1);
           display.setCursor(0,0);
@@ -441,6 +459,16 @@ void loop()
           softwareReset(WDTO_60MS);
         }
       }
+    else{
+      display.setTextSize(1);
+      display.println("No GPS fix available!");
+      display.print("Satellites Found: ");
+      display.println(GPS.satellites);
+      display.display();
+      delay(1);
+      display.setCursor(0,0);
+      display.clearDisplay();
+    }
     }
   }
 
